@@ -182,6 +182,35 @@ export default function App() {
     setProgramInfo(prev => ({ ...prev, [name]: value }));
   };
 
+  const sendTelegramMessage = async (message: string, isAttendance: boolean = false) => {
+    const botToken = import.meta.env.VITE_TELEGRAM_BOT_TOKEN;
+    const chatId = isAttendance 
+      ? (import.meta.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || '-1003966839581')
+      : import.meta.env.VITE_TELEGRAM_CHAT_ID;
+
+    if (!botToken || !chatId) {
+      console.error('Telegram configuration missing');
+      return false;
+    }
+
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+          parse_mode: 'Markdown',
+        }),
+      });
+      const result = await response.json();
+      return result.ok;
+    } catch (error) {
+      console.error('Telegram error:', error);
+      return false;
+    }
+  };
+
   const showNotification = (title: string, message: string, type: 'success' | 'info' | 'warning' = 'success') => {
     setNotification({ show: true, title, message, type });
     setTimeout(() => {
@@ -196,20 +225,26 @@ export default function App() {
     const loginTime = getCurrentTime();
 
     // Send login notification to Telegram
-    try {
-      fetch('/api/notify-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...dutyInfo,
-          programInfo,
-          selectedRegion,
-          loginTime
-        }),
-      });
-    } catch (error) {
-      console.error('Failed to send login notification:', error);
-    }
+    const message = `
+✅ *NOTIFIKASI KEHADIRAN* ✅
+_Petugas telah log masuk ke sistem_
+
+👤 *MAKLUMAT PETUGAS*
+• Nama: ${dutyInfo.nama}
+• Kawasan/Pos: ${dutyInfo.kawasan}
+• Negeri: ${selectedRegion || 'Single Mode'}
+• Masa Log Masuk: ${loginTime}
+
+${programInfo && programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
+• Program: ${programInfo.nama}
+• Lokasi: ${programInfo.lokasi || '-'}
+• Tarikh: ${programInfo.tarikh || '-'}
+• Masa: ${programInfo.masa || '-'}
+` : ''}
+📢 *Status: HADIR*
+    `.trim();
+
+    sendTelegramMessage(message, true);
 
     // Pre-fill namaResponder with duty name, leave namaPerawat empty
     setFormData(prev => ({ 
@@ -226,21 +261,41 @@ export default function App() {
     e.preventDefault();
     setIsSubmitting(true);
 
-    try {
-      const response = await fetch('/api/send-telegram', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...formData,
-          dutyInfo,
-          selectedRegion,
-          systemSource: 'Single Phase System'
-        }),
-      });
+    const message = `
+🚨 *LAPORAN KES BARU* 🚨
+_Laporan dihantar dari sistem single phase_
 
-      if (response.ok) {
+📍 *MAKLUMAT TUGAS*
+• Petugas: ${dutyInfo.nama}
+• Kawasan/Pos: ${dutyInfo.kawasan}
+• Negeri: ${selectedRegion || 'Single Mode'}
+
+📋 *MAKLUMAT PROGRAM*
+• Program: ${formData.namaProgram}
+• Lokasi: ${formData.lokasi || '-'}
+• Tarikh: ${formData.tarikh}
+• Masa: ${formData.masa}
+
+👤 *MAKLUMAT PESAKIT*
+• Nama: ${formData.namaPesakit}
+• Umur: ${formData.umur}
+• Jantina: ${formData.jantina}
+
+🏥 *PENILAIAN & RAWATAN*
+• Aduan: ${formData.aduan}
+• Tanda Vital: ${formData.tandaVital}
+• Rawatan: ${formData.rawatan}
+
+✅ *STATUS & PENGESAHAN*
+• Status Kes: ${formData.statusKes}
+• Nama Perawat: ${formData.namaPerawat || '-'}
+• Nama Responder: ${formData.namaResponder}
+    `.trim();
+
+    try {
+      const success = await sendTelegramMessage(message);
+
+      if (success) {
         setTotalCases(prev => prev + 1);
         showNotification('Kes Dihantar ke MECC', 'Laporan kes telah berjaya dihantar ke sistem MECC Telegram.', 'success');
         setIsFormExpanded(false);
@@ -279,20 +334,23 @@ export default function App() {
 
     showNotification('Log Keluar...', 'Menghantar ringkasan tugas ke Telegram.', 'warning');
     
-    try {
-      await fetch('/api/notify-logout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...currentDutyInfo,
-          selectedRegion,
-          logoutTime,
-          totalCases: currentTotalCases
-        }),
-      });
-    } catch (error) {
-      console.error('Failed to send logout notification:', error);
-    }
+    const message = `
+⚠️ *NOTIFIKASI LOG KELUAR* ⚠️
+_Petugas telah menamatkan tugas_
+
+👤 *MAKLUMAT PETUGAS*
+• Nama: ${currentDutyInfo.nama}
+• Kawasan/Pos: ${currentDutyInfo.kawasan}
+• Negeri: ${selectedRegion || 'Single Mode'}
+• Masa Log Keluar: ${logoutTime}
+
+📊 *RINGKASAN TUGAS*
+• Jumlah Kes Dilaporkan: ${currentTotalCases}
+
+📢 *Status: LOG KELUAR*
+    `.trim();
+
+    sendTelegramMessage(message, true);
 
     setTimeout(() => {
       // Reset everything
