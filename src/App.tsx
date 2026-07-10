@@ -19,7 +19,7 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { supabase } from './lib/supabase';
 import { db, auth, googleProvider, signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser, handleFirestoreError, OperationType } from './lib/firebase';
-import { collection, getDocs, limit, query, addDoc, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, limit, query, addDoc, updateDoc, doc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 type ViewState = 'selection' | 'dashboard' | 'region-selection' | 'duty-start' | 'confirmation' | 'mecc';
 type DashboardTab = 'form' | 'reports';
@@ -573,6 +573,17 @@ export default function App() {
     }
   }, [isProgramReportModalOpen]);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isWhatsAppSelected, setIsWhatsAppSelected] = useState<boolean>(false);
+  
+  // Realtime MECC notifications
+  const [meccRealtimeNotifications, setMeccRealtimeNotifications] = useState<{
+    id: string;
+    type: 'new_case' | 'log_masuk' | 'log_keluar';
+    title: string;
+    message: string;
+    timestamp: string;
+    senderName: string;
+  }[]>([]);
   const [images, setImages] = useState<string[]>([]);
   const [isCapturing, setIsCapturing] = useState(false);
   const videoRef = React.useRef<HTMLVideoElement>(null);
@@ -1409,10 +1420,160 @@ ${programInfo && programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
   }, [dashboardTab]);
 
   useEffect(() => {
-    if (view === 'mecc') {
-      fetchReports();
-      fetchAttendanceLogs();
+    if (view !== 'mecc') {
+      setMeccRealtimeNotifications([]);
+      return;
     }
+
+    // Fetch initial data
+    fetchReports();
+    fetchAttendanceLogs();
+
+    const listenerStartTime = new Date();
+    const initialReportIds = new Set<string>();
+    let reportsInitialized = false;
+
+    // 1. Listen for new reports (case reports)
+    const reportsCol = collection(db, 'reports');
+    const unsubscribeReports = onSnapshot(reportsCol, (snapshot) => {
+      let hasChanges = false;
+      
+      snapshot.docChanges().forEach((change) => {
+        const docId = change.doc.id;
+        const data = change.doc.data();
+        
+        if (change.type === 'added') {
+          let isNew = false;
+          if (reportsInitialized) {
+            isNew = true;
+          } else {
+            // Check if document createdAt is newer than listener startup
+            const createdAt = data.createdAt ? (data.createdAt.seconds ? new Date(data.createdAt.seconds * 1000) : new Date(data.createdAt)) : null;
+            if (createdAt && createdAt.getTime() > listenerStartTime.getTime() - 10000) {
+              isNew = true;
+            }
+          }
+
+          if (isNew && !initialReportIds.has(docId)) {
+            hasChanges = true;
+            const caseNumber = data.case_number || data.caseNumber || 'N/A';
+            const reporter = data.nama_responder || data.namaResponder || 'N/A';
+            const patientName = data.nama_pesakit || data.namaPesakit || 'Pesakit';
+            const aduan = data.aduan || 'Tiada aduan';
+            const timeStr = data.masa || new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' });
+
+            setMeccRealtimeNotifications(prev => [
+              {
+                id: `report-${docId}-${Date.now()}`,
+                type: 'new_case',
+                title: '🚨 Kes Baru Dilaporkan',
+                message: `Kes ${caseNumber} (${aduan}) oleh petugas ${reporter} pada pukul ${timeStr}.`,
+                timestamp: timeStr,
+                senderName: reporter
+              },
+              ...prev
+            ]);
+          }
+          initialReportIds.add(docId);
+        }
+      });
+      
+      if (reportsInitialized && hasChanges) {
+        fetchReports();
+      }
+      
+      reportsInitialized = true;
+    }, (error) => {
+      console.error("Realtime reports listener error:", error);
+    });
+
+    // 2. Listen for attendance (log masuk & log keluar)
+    const attendanceCol = collection(db, 'attendance');
+    const attendanceLogoutStates = new Map<string, string | null>();
+    let attendanceInitialized = false;
+
+    const unsubscribeAttendance = onSnapshot(attendanceCol, (snapshot) => {
+      let hasChanges = false;
+      
+      snapshot.docChanges().forEach((change) => {
+        const docId = change.doc.id;
+        const data = change.doc.data();
+        const currentLogoutTime = data.logout_time || data.masa_log_keluar || null;
+        
+        if (change.type === 'added') {
+          // Store initial state
+          attendanceLogoutStates.set(docId, currentLogoutTime);
+
+          let isNew = false;
+          if (attendanceInitialized) {
+            isNew = true;
+          } else {
+            const loginTimeStr = data.login_time || data.masa_log_masuk;
+            const loginTime = loginTimeStr ? new Date(loginTimeStr) : null;
+            if (loginTime && loginTime.getTime() > listenerStartTime.getTime() - 10000) {
+              isNew = true;
+            }
+          }
+
+          if (isNew) {
+            hasChanges = true;
+            const name = data.nama || 'Petugas';
+            const kawasan = data.kawasan || 'Pos';
+            const loginTimeStr = data.login_time || data.masa_log_masuk;
+            const timeStr = loginTimeStr 
+              ? new Date(loginTimeStr).toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' }) 
+              : new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' });
+
+            setMeccRealtimeNotifications(prev => [
+              {
+                id: `login-${docId}-${Date.now()}`,
+                type: 'log_masuk',
+                title: '🟢 Petugas Log Masuk',
+                message: `Petugas ${name} mula tugas di ${kawasan} pada jam ${timeStr}.`,
+                timestamp: timeStr,
+                senderName: name
+              },
+              ...prev
+            ]);
+          }
+        } else if (change.type === 'modified') {
+          const previousLogoutTime = attendanceLogoutStates.get(docId) || null;
+          attendanceLogoutStates.set(docId, currentLogoutTime);
+
+          // If transition from null -> non-null
+          if (!previousLogoutTime && currentLogoutTime) {
+            hasChanges = true;
+            const name = data.nama || 'Petugas';
+            const timeStr = new Date(currentLogoutTime).toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' });
+
+            setMeccRealtimeNotifications(prev => [
+              {
+                id: `logout-${docId}-${Date.now()}`,
+                type: 'log_keluar',
+                title: '🔴 Petugas Tamat Tugas',
+                message: `Petugas ${name} tamat tugas pada jam ${timeStr}.`,
+                timestamp: timeStr,
+                senderName: name
+              },
+              ...prev
+            ]);
+          }
+        }
+      });
+
+      if (attendanceInitialized && hasChanges) {
+        fetchAttendanceLogs();
+      }
+
+      attendanceInitialized = true;
+    }, (error) => {
+      console.error("Realtime attendance listener error:", error);
+    });
+
+    return () => {
+      unsubscribeReports();
+      unsubscribeAttendance();
+    };
   }, [view]);
 
   const compressImage = (base64: string, maxWidth: number = 800, maxHeight: number = 800): Promise<string> => {
@@ -1686,6 +1847,10 @@ ${formData.lat && formData.lng ? `• Koordinat: ${formData.lat},${formData.lng}
       
       const result = isTelegramEnabled ? await sendWithImages(reportData, message, images) : { success: true, disabled: true };
 
+      if (isWhatsAppSelected) {
+        shareReportToWhatsApp({ ...reportData, images_count: images.length, images });
+      }
+
       if (result.success && !result.disabled) {
         showNotification('Telegram: BERJAYA', 'Laporan kes telah berjaya dihantar ke bot Telegram MECC.', 'success');
       } else if (!result.disabled) {
@@ -1824,9 +1989,51 @@ ${reportData.lat && reportData.lng ? `• Koordinat: ${reportData.lat},${reportD
     }
   };
 
+  const shareReportToWhatsApp = (report: any) => {
+    const caseNumber = report.case_number || report.caseNumber;
+    const isTest = report.mode === 'test' || (report.aduan && report.aduan.includes('[⚠️ TEST MODE]'));
+    const testModeHeader = isTest ? "⚠️ *TEST MODE DIGUNAKAN* ⚠️\n_Data ini adalah simulasi sahaja_\n\n" : "";
+
+    const message = `
+${testModeHeader}🚨 *LAPORAN KES BARU* 🚨
+_No. Kes: ${caseNumber}_
+
+📍 *MAKLUMAT TUGAS*
+• Petugas: ${report.nama_responder || report.namaResponder || dutyInfo.nama || '-'}
+• Kawasan/Pos: ${report.kawasan || dutyInfo.kawasan || '-'}
+• Negeri: ${report.region || selectedRegion || '-'}
+
+📋 *MAKLUMAT PROGRAM*
+• Program: ${report.nama_program || report.namaProgram || '-'}
+• Lokasi: ${report.lokasi || '-'}
+${report.lat && report.lng ? `• Koordinat: ${report.lat},${report.lng}\n• Google Maps: https://www.google.com/maps?q=${report.lat},${report.lng}\n` : ''}• Tarikh: ${report.tarikh || '-'}
+• Masa: ${report.masa || '-'}
+
+👤 *MAKLUMAT PESAKIT*
+• Nama: ${report.nama_pesakit || report.namaPesakit || '-'}
+• Umur: ${report.umur || '-'}
+• Jantina: ${report.jantina || '-'}
+
+🏥 *PENILAIAN & RAWATAN*
+• Aduan: ${report.aduan || '-'}
+• Tanda Vital: ${report.tanda_vital || report.tandaVital || '-'}
+• Rawatan: ${report.rawatan || '-'}
+
+✅ *STATUS & PENGESAHAN*
+• Status Kes: ${report.status_kes || report.statusKes || '-'}
+• Nama Perawat: ${report.nama_perawat || report.namaPerawat || '-'}
+• Nama Responder: ${report.nama_responder || report.namaResponder || '-'}
+${report.images_count > 0 || (report.images && report.images.length > 0) ? `\n🖼️ *LAMPIRAN GAMBAR*\n• Terdapat ${report.images_count || (report.images ? report.images.length : 0)} keping gambar dilampirkan dalam rekod pangkalan data sistem.` : ''}
+    `.trim();
+
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+    window.open(whatsappUrl, '_blank');
+  };
+
   const handleNewReport = () => {
     localStorage.removeItem('resq_form_data');
     clearForm();
+    setIsWhatsAppSelected(false);
     setIsFormExpanded(true);
     // Re-fill responder name from duty info and program info if available
     setFormData(prev => ({ 
@@ -3234,6 +3441,16 @@ _Petugas telah menamatkan tugas_
                                 <div className="flex items-center justify-center gap-2">
                                   <button
                                     type="button"
+                                    onClick={() => shareReportToWhatsApp(report)}
+                                    className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-600 hover:text-white transition-all shadow-sm cursor-pointer border-none flex items-center justify-center"
+                                    title="Kongsi ke WhatsApp"
+                                  >
+                                    <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                                      <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.54 3.73 1.57 5.3L2 22l4.87-1.53c1.51.93 3.27 1.48 5.13 1.48 5.51 0 9.99-4.49 9.99-10S17.514 2 12.004 2zm5.2 13.91c-.24.67-1.2 1.24-1.65 1.29-.44.05-.88.24-2.85-.53-2.37-.93-3.87-3.34-3.99-3.5-.12-.16-.96-1.28-.96-2.45 0-1.17.61-1.74.83-1.97.22-.24.48-.3.64-.3.16 0 .32.01.46.01.15 0 .34-.06.53.39.2.48.67 1.63.73 1.75.06.12.1.26.02.43-.08.17-.12.27-.24.41-.12.14-.26.31-.37.42-.12.12-.25.26-.11.5.14.24.63 1.04 1.35 1.68.92.83 1.7 1.08 1.94 1.2.24.12.38.1.52-.06.14-.17.61-.71.77-.95.16-.24.32-.2.53-.12.22.08 1.37.65 1.6.77.23.12.38.18.44.28.06.11.06.62-.18 1.29z"/>
+                                    </svg>
+                                  </button>
+                                  <button
+                                    type="button"
                                     onClick={() => resendReportToTelegram(report)}
                                     className="p-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-600 hover:text-white transition-all shadow-sm cursor-pointer border-none"
                                     title="Hantar Semula ke Telegram"
@@ -4463,6 +4680,16 @@ _Petugas telah menamatkan tugas_
                                       </td>
                                       <td className="p-4 text-center">
                                         <div className="flex items-center justify-center gap-2">
+                                          <button
+                                            type="button"
+                                            onClick={() => shareReportToWhatsApp(report)}
+                                            className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg transition-colors cursor-pointer border-none flex items-center justify-center"
+                                            title="Kongsi ke WhatsApp"
+                                          >
+                                            <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                                              <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.54 3.73 1.57 5.3L2 22l4.87-1.53c1.51.93 3.27 1.48 5.13 1.48 5.51 0 9.99-4.49 9.99-10S17.514 2 12.004 2zm5.2 13.91c-.24.67-1.2 1.24-1.65 1.29-.44.05-.88.24-2.85-.53-2.37-.93-3.87-3.34-3.99-3.5-.12-.16-.96-1.28-.96-2.45 0-1.17.61-1.74.83-1.97.22-.24.48-.3.64-.3.16 0 .32.01.46.01.15 0 .34-.06.53.39.2.48.67 1.63.73 1.75.06.12.1.26.02.43-.08.17-.12.27-.24.41-.12.14-.26.31-.37.42-.12.12-.25.26-.11.5.14.24.63 1.04 1.35 1.68.92.83 1.7 1.08 1.94 1.2.24.12.38.1.52-.06.14-.17.61-.71.77-.95.16-.24.32-.2.53-.12.22.08 1.37.65 1.6.77.23.12.38.18.44.28.06.11.06.62-.18 1.29z"/>
+                                            </svg>
+                                          </button>
                                           <button
                                             type="button"
                                             onClick={() => resendReportToTelegram(report)}
@@ -5834,10 +6061,19 @@ _Petugas telah menamatkan tugas_
                 </div>
               </div>
 
-              <div className="p-6 bg-gray-50 border-t border-gray-100">
+              <div className="p-6 bg-gray-50 border-t border-gray-100 flex gap-3">
+                <button
+                  onClick={() => shareReportToWhatsApp(selectedReport)}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                    <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.54 3.73 1.57 5.3L2 22l4.87-1.53c1.51.93 3.27 1.48 5.13 1.48 5.51 0 9.99-4.49 9.99-10S17.514 2 12.004 2zm5.2 13.91c-.24.67-1.2 1.24-1.65 1.29-.44.05-.88.24-2.85-.53-2.37-.93-3.87-3.34-3.99-3.5-.12-.16-.96-1.28-.96-2.45 0-1.17.61-1.74.83-1.97.22-.24.48-.3.64-.3.16 0 .32.01.46.01.15 0 .34-.06.53.39.2.48.67 1.63.73 1.75.06.12.1.26.02.43-.08.17-.12.27-.24.41-.12.14-.26.31-.37.42-.12.12-.25.26-.11.5.14.24.63 1.04 1.35 1.68.92.83 1.7 1.08 1.94 1.2.24.12.38.1.52-.06.14-.17.61-.71.77-.95.16-.24.32-.2.53-.12.22.08 1.37.65 1.6.77.23.12.38.18.44.28.06.11.06.62-.18 1.29z"/>
+                  </svg>
+                  Kongsi ke WhatsApp
+                </button>
                 <button
                   onClick={() => setSelectedReport(null)}
-                  className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all font-mono"
+                  className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all font-mono"
                 >
                   CLOSE DETAILS
                 </button>
@@ -6186,6 +6422,27 @@ _Petugas telah menamatkan tugas_
                       <p className="font-bold text-gray-900">{images.length} Keping Gambar</p>
                     </div>
                   </div>
+
+                  {/* WhatsApp Forwarding Option */}
+                  <label className="flex items-center gap-3 p-4 bg-emerald-50/50 hover:bg-emerald-50/80 border border-emerald-100 rounded-2xl cursor-pointer transition-all select-none">
+                    <input
+                      type="checkbox"
+                      checked={isWhatsAppSelected}
+                      onChange={(e) => setIsWhatsAppSelected(e.target.checked)}
+                      className="w-4 h-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 accent-emerald-600 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <p className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5 fill-emerald-600 shrink-0" viewBox="0 0 24 24">
+                          <path d="M12.004 2c-5.51 0-9.99 4.49-9.99 10 0 1.91.54 3.73 1.57 5.3L2 22l4.87-1.53c1.51.93 3.27 1.48 5.13 1.48 5.51 0 9.99-4.49 9.99-10S17.514 2 12.004 2zm5.2 13.91c-.24.67-1.2 1.24-1.65 1.29-.44.05-.88.24-2.85-.53-2.37-.93-3.87-3.34-3.99-3.5-.12-.16-.96-1.28-.96-2.45 0-1.17.61-1.74.83-1.97.22-.24.48-.3.64-.3.16 0 .32.01.46.01.15 0 .34-.06.53.39.2.48.67 1.63.73 1.75.06.12.1.26.02.43-.08.17-.12.27-.24.41-.12.14-.26.31-.37.42-.12.12-.25.26-.11.5.14.24.63 1.04 1.35 1.68.92.83 1.7 1.08 1.94 1.2.24.12.38.1.52-.06.14-.17.61-.71.77-.95.16-.24.32-.2.53-.12.22.08 1.37.65 1.6.77.23.12.38.18.44.28.06.11.06.62-.18 1.29z"/>
+                        </svg>
+                        Hantar ke WhatsApp Juga
+                      </p>
+                      <p className="text-[9px] text-emerald-600 font-medium leading-normal">
+                        Buka aplikasi WhatsApp & pilih penerima secara manual.
+                      </p>
+                    </div>
+                  </label>
                 </div>
 
                 <div className="flex flex-col gap-3 pt-2">
@@ -6265,6 +6522,70 @@ _Petugas telah menamatkan tugas_
           )}
         </motion.div>
       )}
+
+      {/* Real-time MECC Notification Popups */}
+      {view === 'mecc' && meccRealtimeNotifications.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+          <AnimatePresence>
+            {meccRealtimeNotifications.slice(0, 4).map((notif) => (
+              <motion.div
+                key={notif.id}
+                initial={{ opacity: 0, x: 50, y: 10, scale: 0.95 }}
+                animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 50, scale: 0.9 }}
+                transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                className={`p-4 rounded-2xl shadow-xl border flex gap-3 pointer-events-auto ${
+                  notif.type === 'new_case' 
+                    ? 'bg-amber-50 border-amber-200 text-amber-950 shadow-amber-900/10' 
+                    : notif.type === 'log_masuk'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-950 shadow-emerald-900/10'
+                      : 'bg-rose-50 border-rose-200 text-rose-950 shadow-rose-900/10'
+                }`}
+              >
+                <div className="flex-shrink-0 mt-0.5">
+                  {notif.type === 'new_case' ? (
+                    <div className="p-2 bg-amber-500 text-white rounded-xl">
+                      <Ambulance className="w-5 h-5 animate-pulse" />
+                    </div>
+                  ) : notif.type === 'log_masuk' ? (
+                    <div className="p-2 bg-emerald-600 text-white rounded-xl">
+                      <Users className="w-5 h-5" />
+                    </div>
+                  ) : (
+                    <div className="p-2 bg-rose-600 text-white rounded-xl">
+                      <UserMinus className="w-5 h-5" />
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex-1 text-left min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-xs uppercase tracking-wider">
+                      {notif.title}
+                    </span>
+                    <span className="text-[10px] opacity-60 font-mono">
+                      {notif.timestamp}
+                    </span>
+                  </div>
+                  <p className="text-xs mt-1 leading-relaxed font-sans font-medium">
+                    {notif.message}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setMeccRealtimeNotifications(prev => prev.filter(n => n.id !== notif.id));
+                  }}
+                  className="flex-shrink-0 self-start p-1 rounded-full hover:bg-black/5 transition-colors cursor-pointer border-none bg-transparent flex items-center justify-center"
+                >
+                  <X className="w-4 h-4 opacity-50 hover:opacity-100" />
+                </button>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
       {isProgramReportModalOpen && (
         <ProgramReportPDFModal 
           isOpen={isProgramReportModalOpen}
