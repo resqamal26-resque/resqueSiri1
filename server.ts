@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
 import FormData from 'form-data';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -154,6 +155,87 @@ ${data.programInfo && data.programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
       return res.status(500).json({ 
         success: false, 
         error: error.message || 'Gagal menyambung ke API Telegram' 
+      });
+    }
+  });
+
+  // API Route to get current Telegram configuration
+  app.get('/api/telegram-config', (req, res) => {
+    return res.json({
+      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN || '',
+      TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID || '',
+      TELEGRAM_CHAT_ID_ATTENDANCE: process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || ''
+    });
+  });
+
+  // API Route to save Telegram configuration to .env and .env.local
+  app.post('/api/save-telegram-config', (req, res) => {
+    const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_ID_ATTENDANCE } = req.body;
+
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID || !TELEGRAM_CHAT_ID_ATTENDANCE) {
+      return res.status(400).json({
+        success: false,
+        error: 'Sila lengkapkan semua butiran Telegram (Token, Chat ID, dan Chat ID Kehadiran).'
+      });
+    }
+
+    try {
+      const updates = {
+        TELEGRAM_BOT_TOKEN: TELEGRAM_BOT_TOKEN.trim(),
+        TELEGRAM_CHAT_ID: TELEGRAM_CHAT_ID.trim(),
+        TELEGRAM_CHAT_ID_ATTENDANCE: TELEGRAM_CHAT_ID_ATTENDANCE.trim(),
+      };
+
+      // Helper function to update variables in a given file path
+      const updateEnvFile = (filePath: string) => {
+        let content = '';
+        if (fs.existsSync(filePath)) {
+          content = fs.readFileSync(filePath, 'utf8');
+        }
+
+        const lines = content.split('\n');
+        
+        for (const [key, val] of Object.entries(updates)) {
+          let found = false;
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].trim().startsWith(`${key}=`)) {
+              lines[i] = `${key}=${val}`;
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            if (lines.length > 0 && lines[lines.length - 1].trim() !== '') {
+              lines.push('');
+            }
+            lines.push(`${key}=${val}`);
+          }
+        }
+        
+        fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
+      };
+
+      // Update both files
+      updateEnvFile(path.join(process.cwd(), '.env'));
+      updateEnvFile(path.join(process.cwd(), '.env.local'));
+
+      // Also update currently running process variables immediately
+      process.env.TELEGRAM_BOT_TOKEN = updates.TELEGRAM_BOT_TOKEN;
+      process.env.TELEGRAM_CHAT_ID = updates.TELEGRAM_CHAT_ID;
+      process.env.TELEGRAM_CHAT_ID_ATTENDANCE = updates.TELEGRAM_CHAT_ID_ATTENDANCE;
+      process.env.VITE_TELEGRAM_BOT_TOKEN = updates.TELEGRAM_BOT_TOKEN;
+      process.env.VITE_TELEGRAM_CHAT_ID = updates.TELEGRAM_CHAT_ID;
+      process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE = updates.TELEGRAM_CHAT_ID_ATTENDANCE;
+
+      return res.json({
+        success: true,
+        message: 'Konfigurasi Telegram berjaya disimpan ke dalam fail .env dan .env.local.'
+      });
+    } catch (error: any) {
+      console.error('Save env error:', error);
+      return res.status(500).json({
+        success: false,
+        error: `Ralat semasa menyimpan fail: ${error.message}`
       });
     }
   });
