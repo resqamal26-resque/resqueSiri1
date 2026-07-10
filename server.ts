@@ -8,6 +8,54 @@ import fs from 'fs';
 
 dotenv.config();
 
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+
+const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+let db: any = null;
+
+try {
+  if (fs.existsSync(firebaseConfigPath)) {
+    const config = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
+    const firebaseApp = initializeApp(config);
+    db = getFirestore(firebaseApp, config.firestoreDatabaseId);
+    console.log('Firebase initialized successfully on backend server.');
+  } else {
+    console.warn('Firebase config file missing on server, falling back to env.');
+  }
+} catch (error) {
+  console.error('Failed to initialize Firebase on server:', error);
+}
+
+async function getTelegramConfig() {
+  const defaults = {
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN || '',
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID || '',
+    TELEGRAM_CHAT_ID_ATTENDANCE: process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || ''
+  };
+
+  if (!db) {
+    return defaults;
+  }
+
+  try {
+    const docRef = doc(db, 'telegram_config', 'main');
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      return {
+        TELEGRAM_BOT_TOKEN: (data.TELEGRAM_BOT_TOKEN || '').trim(),
+        TELEGRAM_CHAT_ID: (data.TELEGRAM_CHAT_ID || '').trim(),
+        TELEGRAM_CHAT_ID_ATTENDANCE: (data.TELEGRAM_CHAT_ID_ATTENDANCE || '').trim(),
+      };
+    }
+  } catch (err) {
+    console.error('Error fetching Telegram config from Firestore:', err);
+  }
+
+  return defaults;
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -26,8 +74,9 @@ export { app };
 
   app.post('/api/notify-logout', async (req, res) => {
     const data = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE;
+    const config = await getTelegramConfig();
+    const botToken = config.TELEGRAM_BOT_TOKEN;
+    const chatId = config.TELEGRAM_CHAT_ID_ATTENDANCE;
 
     if (!botToken) {
       console.error('Logout Notify: Telegram Bot Token missing');
@@ -74,8 +123,9 @@ _Petugas telah menamatkan tugas_
 
   app.post('/api/notify-login', async (req, res) => {
     const data = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE;
+    const config = await getTelegramConfig();
+    const botToken = config.TELEGRAM_BOT_TOKEN;
+    const chatId = config.TELEGRAM_CHAT_ID_ATTENDANCE;
 
     if (!botToken) {
       console.error('Login Notify: Telegram Bot Token missing');
@@ -126,7 +176,8 @@ ${data.programInfo && data.programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
   // API Route to test Telegram connection without sending any message (using getMe)
   app.post('/api/test-telegram', async (req, res) => {
     const { token } = req.body;
-    const botToken = token || process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
+    const config = await getTelegramConfig();
+    const botToken = token || config.TELEGRAM_BOT_TOKEN;
 
     if (!botToken) {
       return res.status(400).json({ 
@@ -160,16 +211,13 @@ ${data.programInfo && data.programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
   });
 
   // API Route to get current Telegram configuration
-  app.get('/api/telegram-config', (req, res) => {
-    return res.json({
-      TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN || '',
-      TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID || '',
-      TELEGRAM_CHAT_ID_ATTENDANCE: process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || ''
-    });
+  app.get('/api/telegram-config', async (req, res) => {
+    const config = await getTelegramConfig();
+    return res.json(config);
   });
 
-  // API Route to save Telegram configuration to .env and .env.local
-  app.post('/api/save-telegram-config', (req, res) => {
+  // API Route to save Telegram configuration to Firestore
+  app.post('/api/save-telegram-config', async (req, res) => {
     const { TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_ID_ATTENDANCE } = req.body;
 
     if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID || !TELEGRAM_CHAT_ID_ATTENDANCE) {
@@ -179,57 +227,25 @@ ${data.programInfo && data.programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
       });
     }
 
+    if (!db) {
+      return res.status(500).json({
+        success: false,
+        error: 'Firestore is not initialized on the server.'
+      });
+    }
+
     try {
-      const updates = {
+      const docRef = doc(db, 'telegram_config', 'main');
+      await setDoc(docRef, {
         TELEGRAM_BOT_TOKEN: TELEGRAM_BOT_TOKEN.trim(),
         TELEGRAM_CHAT_ID: TELEGRAM_CHAT_ID.trim(),
         TELEGRAM_CHAT_ID_ATTENDANCE: TELEGRAM_CHAT_ID_ATTENDANCE.trim(),
-      };
-
-      // Helper function to update variables in a given file path
-      const updateEnvFile = (filePath: string) => {
-        let content = '';
-        if (fs.existsSync(filePath)) {
-          content = fs.readFileSync(filePath, 'utf8');
-        }
-
-        const lines = content.split('\n');
-        
-        for (const [key, val] of Object.entries(updates)) {
-          let found = false;
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].trim().startsWith(`${key}=`)) {
-              lines[i] = `${key}=${val}`;
-              found = true;
-              break;
-            }
-          }
-          if (!found) {
-            if (lines.length > 0 && lines[lines.length - 1].trim() !== '') {
-              lines.push('');
-            }
-            lines.push(`${key}=${val}`);
-          }
-        }
-        
-        fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
-      };
-
-      // Update both files
-      updateEnvFile(path.join(process.cwd(), '.env'));
-      updateEnvFile(path.join(process.cwd(), '.env.local'));
-
-      // Also update currently running process variables immediately
-      process.env.TELEGRAM_BOT_TOKEN = updates.TELEGRAM_BOT_TOKEN;
-      process.env.TELEGRAM_CHAT_ID = updates.TELEGRAM_CHAT_ID;
-      process.env.TELEGRAM_CHAT_ID_ATTENDANCE = updates.TELEGRAM_CHAT_ID_ATTENDANCE;
-      process.env.VITE_TELEGRAM_BOT_TOKEN = updates.TELEGRAM_BOT_TOKEN;
-      process.env.VITE_TELEGRAM_CHAT_ID = updates.TELEGRAM_CHAT_ID;
-      process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE = updates.TELEGRAM_CHAT_ID_ATTENDANCE;
+        updatedAt: new Date().toISOString()
+      });
 
       return res.json({
         success: true,
-        message: 'Konfigurasi Telegram berjaya disimpan ke dalam fail .env dan .env.local.'
+        message: 'Konfigurasi Telegram berjaya disimpan terus ke Firestore!'
       });
     } catch (error: any) {
       console.error('Save env error:', error);
@@ -243,8 +259,9 @@ ${data.programInfo && data.programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
   // API Route for Telegram
   app.post('/api/send-telegram', async (req, res) => {
     const data = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID;
+    const config = await getTelegramConfig();
+    const botToken = config.TELEGRAM_BOT_TOKEN;
+    const chatId = config.TELEGRAM_CHAT_ID;
 
     if (!botToken || !chatId) {
       console.error('Send Telegram: Credentials missing');
@@ -316,8 +333,9 @@ _No. Kes: ${data.case_number || 'N/A'}_
   // API Route for Telegram with Images
   app.post('/api/send-report-with-images', async (req, res) => {
     const { reportData, message, images } = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID;
+    const config = await getTelegramConfig();
+    const botToken = config.TELEGRAM_BOT_TOKEN;
+    const chatId = config.TELEGRAM_CHAT_ID;
 
     if (!botToken || !chatId) {
       console.error('Send Report: Credentials missing');
@@ -396,8 +414,9 @@ _No. Kes: ${data.case_number || 'N/A'}_
   // API Route for sending PDF to Telegram
   app.post('/api/send-pdf-telegram', async (req, res) => {
     const { pdfBase64, filename, caption } = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID;
+    const config = await getTelegramConfig();
+    const botToken = config.TELEGRAM_BOT_TOKEN;
+    const chatId = config.TELEGRAM_CHAT_ID;
 
     if (!botToken || !chatId) {
       console.error('Send PDF: Credentials missing');

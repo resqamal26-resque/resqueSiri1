@@ -298,6 +298,59 @@ export default function App() {
   const [isTelegramVerifyModalOpen, setIsTelegramVerifyModalOpen] = useState<boolean>(false);
   const [isTelegramVerifyLoading, setIsTelegramVerifyLoading] = useState<boolean>(false);
 
+  const [telegramBotTokenInput, setTelegramBotTokenInput] = useState<string>('');
+  const [telegramChatIdInput, setTelegramChatIdInput] = useState<string>('');
+  const [telegramChatIdAttendanceInput, setTelegramChatIdAttendanceInput] = useState<string>('');
+  const [isTelegramSaveLoading, setIsTelegramSaveLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fetchTelegramConfig = async () => {
+      try {
+        const res = await fetch('/api/telegram-config');
+        if (res.ok) {
+          const data = await res.json();
+          setTelegramBotTokenInput(data.TELEGRAM_BOT_TOKEN || '');
+          setTelegramChatIdInput(data.TELEGRAM_CHAT_ID || '');
+          setTelegramChatIdAttendanceInput(data.TELEGRAM_CHAT_ID_ATTENDANCE || '');
+        }
+      } catch (err) {
+        console.error('Failed to fetch Telegram config:', err);
+      }
+    };
+    fetchTelegramConfig();
+  }, []);
+
+  const saveTelegramConfig = async () => {
+    if (!telegramBotTokenInput || !telegramChatIdInput || !telegramChatIdAttendanceInput) {
+      showNotification('Lengkapkan Butiran', 'Sila isi Token Bot, Chat ID, dan Chat ID Kehadiran terlebih dahulu.', 'warning');
+      return;
+    }
+    setIsTelegramSaveLoading(true);
+    try {
+      const res = await fetch('/api/save-telegram-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          TELEGRAM_BOT_TOKEN: telegramBotTokenInput,
+          TELEGRAM_CHAT_ID: telegramChatIdInput,
+          TELEGRAM_CHAT_ID_ATTENDANCE: telegramChatIdAttendanceInput
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showNotification('Simpan Berjaya', 'Butiran Telegram berjaya disimpan terus ke dalam Firestore bagi rujukan semua pengguna!', 'success');
+      } else {
+        showNotification('Ralat Menyimpan', data.error || 'Gagal menyimpan konfigurasi.', 'warning');
+      }
+    } catch (err: any) {
+      console.error('Save Telegram config error:', err);
+      showNotification('Ralat Sistem', err.message || 'Gagal menyambung ke server.', 'warning');
+    } finally {
+      setIsTelegramSaveLoading(false);
+    }
+  };
+
   const toggleTelegram = async () => {
     const newState = !isTelegramEnabled;
     const currentKLTime = getKLTime();
@@ -5453,6 +5506,66 @@ _Petugas telah menamatkan tugas_
                               isTelegramEnabled ? 'translate-x-5' : 'translate-x-0'
                             }`}
                           />
+                        </button>
+                      </div>
+
+                      {/* Konfigurasi Telegram Simpan Terus Ke Firestore */}
+                      <div className="p-4 bg-gray-50 border border-gray-100 rounded-2xl space-y-3 shadow-inner">
+                        <h5 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
+                          <Cloud className="w-3.5 h-3.5 text-sky-600" />
+                          Tetapan Telegram (Simpan ke Firestore)
+                        </h5>
+                        <p className="text-[10px] text-gray-400 leading-normal">
+                          Butiran ini disimpan terus ke Firestore supaya boleh dikongsi secara automatik oleh semua petugas dan pengguna sistem ini tanpa sebarang tetapan manual di Netlify / Vercel.
+                        </p>
+                        
+                        <div className="space-y-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Telegram Bot Token (TELEGRAM_BOT_TOKEN)</label>
+                            <input
+                              type="text"
+                              value={telegramBotTokenInput}
+                              onChange={(e) => setTelegramBotTokenInput(e.target.value)}
+                              placeholder="Contoh: 123456789:ABCdefGhIJKlmNo..."
+                              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500 transition-colors"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Chat ID Laporan Kes (TELEGRAM_CHAT_ID)</label>
+                            <input
+                              type="text"
+                              value={telegramChatIdInput}
+                              onChange={(e) => setTelegramChatIdInput(e.target.value)}
+                              placeholder="Contoh: -1001234567890"
+                              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500 transition-colors"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Chat ID Kehadiran (TELEGRAM_CHAT_ID_ATTENDANCE)</label>
+                            <input
+                              type="text"
+                              value={telegramChatIdAttendanceInput}
+                              onChange={(e) => setTelegramChatIdAttendanceInput(e.target.value)}
+                              placeholder="Contoh: -1009876543210"
+                              className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:border-sky-500 transition-colors"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={saveTelegramConfig}
+                          disabled={isTelegramSaveLoading}
+                          className="w-full py-2.5 bg-sky-600 hover:bg-sky-500 disabled:bg-gray-400 text-white rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer shadow-md shadow-sky-100"
+                        >
+                          {isTelegramSaveLoading ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Save className="w-3.5 h-3.5" />
+                          )}
+                          Simpan Butiran ke Firestore
                         </button>
                       </div>
 

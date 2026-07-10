@@ -68,6 +68,18 @@
         "masa": { "type": "string" },
         "lokasi": { "type": "string" }
       }
+    },
+    "TelegramConfig": {
+      "title": "Telegram Configuration",
+      "description": "System-wide Telegram bot settings",
+      "type": "object",
+      "properties": {
+        "TELEGRAM_BOT_TOKEN": { "type": "string" },
+        "TELEGRAM_CHAT_ID": { "type": "string" },
+        "TELEGRAM_CHAT_ID_ATTENDANCE": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_ID_ATTENDANCE"]
     }
   },
   "firestore": {
@@ -78,6 +90,10 @@
     "/attendance/{attendanceId}": {
       "schema": "Attendance",
       "description": "Collection of all duty session logs"
+    },
+    "/telegram_config/{configId}": {
+      "schema": "TelegramConfig",
+      "description": "System-wide Telegram Bot settings stored in Firestore"
     }
   }
 }
