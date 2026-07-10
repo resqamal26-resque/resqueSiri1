@@ -122,6 +122,42 @@ ${data.programInfo && data.programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
     }
   });
 
+  // API Route to test Telegram connection without sending any message (using getMe)
+  app.post('/api/test-telegram', async (req, res) => {
+    const { token } = req.body;
+    const botToken = token || process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
+
+    if (!botToken) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Sila masukkan Token Bot Telegram untuk diuji.' 
+      });
+    }
+
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+      const result = await response.json() as any;
+      
+      if (result.ok) {
+        return res.json({ 
+          success: true, 
+          botInfo: result.result 
+        });
+      } else {
+        return res.status(400).json({ 
+          success: false, 
+          error: result.description || 'Ralat maklum balas daripada Telegram' 
+        });
+      }
+    } catch (error: any) {
+      console.error('Telegram test error:', error);
+      return res.status(500).json({ 
+        success: false, 
+        error: error.message || 'Gagal menyambung ke API Telegram' 
+      });
+    }
+  });
+
   // API Route for Telegram
   app.post('/api/send-telegram', async (req, res) => {
     const data = req.body;

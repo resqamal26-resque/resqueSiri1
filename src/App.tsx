@@ -293,6 +293,11 @@ export default function App() {
   const [telegramTestStatus, setTelegramTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [telegramTestMessage, setTelegramTestMessage] = useState<string>('');
 
+  const [telegramVerifyToken, setTelegramVerifyToken] = useState<string>('');
+  const [telegramVerifyResult, setTelegramVerifyResult] = useState<any>(null);
+  const [isTelegramVerifyModalOpen, setIsTelegramVerifyModalOpen] = useState<boolean>(false);
+  const [isTelegramVerifyLoading, setIsTelegramVerifyLoading] = useState<boolean>(false);
+
   const toggleTelegram = async () => {
     const newState = !isTelegramEnabled;
     const currentKLTime = getKLTime();
@@ -381,6 +386,31 @@ export default function App() {
       console.error('Telegram test error:', error);
       setTelegramTestStatus('error');
       setTelegramTestMessage(`Ralat Sambungan: ${error.message || 'Ralat tidak diketahui.'}`);
+    }
+  };
+
+  const verifyTelegramConnection = async (tokenInput?: string) => {
+    setIsTelegramVerifyLoading(true);
+    setTelegramVerifyResult(null);
+    setIsTelegramVerifyModalOpen(true);
+
+    try {
+      const response = await fetch('/api/test-telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tokenInput || telegramVerifyToken || undefined })
+      });
+
+      const result = await response.json();
+      setTelegramVerifyResult(result);
+    } catch (error: any) {
+      console.error('Telegram verify error:', error);
+      setTelegramVerifyResult({
+        success: false,
+        error: error.message || 'Gagal membuat sambungan ke server atau rangkaian terputus.'
+      });
+    } finally {
+      setIsTelegramVerifyLoading(false);
     }
   };
 
@@ -5480,7 +5510,17 @@ _Petugas telah menamatkan tugas_
                         )}
                       </div>
 
-                      <div className="pt-3">
+                      <div className="pt-3 space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => verifyTelegramConnection()}
+                          disabled={isTelegramVerifyLoading}
+                          className="w-full py-4 bg-sky-600 hover:bg-sky-500 disabled:bg-gray-400 text-white rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2 active:scale-95"
+                        >
+                          <Bot className="w-4 h-4" />
+                          Semak Maklumat Bot (getMe)
+                        </button>
+
                         <button
                           type="button"
                           onClick={testTelegramConnection}
@@ -6145,6 +6185,122 @@ _Petugas telah menamatkan tugas_
           attendanceLogs={selectedLaporanProgram ? attendanceLogs.filter(log => (log.program_nama || log.programNama || '').toLowerCase().trim() === selectedLaporanProgram.toLowerCase().trim()) : attendanceRecords}
           showNotification={showNotification}
         />
+      )}
+
+      {isTelegramVerifyModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-3xl w-full max-w-lg overflow-hidden flex flex-col shadow-2xl border border-gray-100"
+          >
+            {/* Header */}
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-sky-600 text-white">
+              <div className="flex items-center gap-3">
+                <Bot className="w-6 h-6 animate-pulse" />
+                <h2 className="text-lg font-bold font-sans">Semakan API Telegram Bot</h2>
+              </div>
+              <button 
+                onClick={() => setIsTelegramVerifyModalOpen(false)} 
+                className="p-1.5 hover:bg-white/10 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh]">
+              {isTelegramVerifyLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                  <div className="w-12 h-12 rounded-full border-4 border-sky-100 border-t-sky-600 animate-spin" />
+                  <p className="text-sm font-medium text-gray-500">Menghubungi pelayan Telegram API...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Status Card */}
+                  {telegramVerifyResult?.success ? (
+                    <div className="p-4 bg-green-50 border border-green-100 rounded-2xl flex items-start gap-3">
+                      <div className="p-2 bg-green-200 text-green-700 rounded-xl shrink-0">
+                        <Check className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-green-950">Sambungan Berjaya!</h4>
+                        <p className="text-xs text-green-700 mt-1">
+                          Server berjaya berhubung dengan bot Telegram anda menggunakan kaedah <code className="bg-green-100 px-1 py-0.5 rounded text-green-900 font-mono">getMe</code>.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-red-50 border border-red-100 rounded-2xl flex items-start gap-3">
+                      <div className="p-2 bg-red-200 text-red-700 rounded-xl shrink-0">
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-red-950">Sambungan Gagal</h4>
+                        <p className="text-xs text-red-700 mt-1">
+                          {telegramVerifyResult?.error || 'Sila pastikan bot token anda betul dan aktif.'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Reply Details */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block">Maklum Balas (Payload) Rasmi dari Bot</label>
+                    <div className="bg-gray-950 text-emerald-400 p-4 rounded-2xl font-mono text-xs overflow-x-auto border border-gray-900 max-h-48 shadow-inner">
+                      {telegramVerifyResult?.success && telegramVerifyResult.botInfo ? (
+                        <pre className="whitespace-pre-wrap">{JSON.stringify(telegramVerifyResult.botInfo, null, 2)}</pre>
+                      ) : (
+                        <pre className="whitespace-pre-wrap text-red-400">
+                          {JSON.stringify({ 
+                            ok: false, 
+                            error_code: 401, 
+                            description: telegramVerifyResult?.error || "Unauthorized / Token tidak sah" 
+                          }, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Informative Guidance */}
+                  {telegramVerifyResult?.success && telegramVerifyResult.botInfo && (
+                    <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-2 text-xs text-gray-600">
+                      <p className="font-bold text-gray-800 font-sans">📋 Informasi Bot:</p>
+                      <ul className="list-disc pl-4 space-y-1">
+                        <li><strong>Nama:</strong> {telegramVerifyResult.botInfo.first_name}</li>
+                        <li><strong>Username:</strong> @{telegramVerifyResult.botInfo.username}</li>
+                        <li><strong>Boleh Sertai Kumpulan:</strong> {telegramVerifyResult.botInfo.can_join_groups ? 'Ya' : 'Tidak'}</li>
+                      </ul>
+                      <p className="mt-2 text-[11px] text-gray-400 leading-relaxed">
+                        *Nota: Bot mestilah dimasukkan ke dalam Chat Kumpulan (Group Chat) anda sebagai <strong>Admin</strong> dan ditauliahkan kebenaran menghantar mesej agar fungsi laporan berfungsi sepenuhnya.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Action buttons inside modal */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => verifyTelegramConnection()}
+                  disabled={isTelegramVerifyLoading}
+                  className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-50 text-gray-700 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isTelegramVerifyLoading ? 'animate-spin' : ''}`} />
+                  Semak Semula
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsTelegramVerifyModalOpen(false)}
+                  className="flex-1 py-3 bg-gray-950 hover:bg-gray-800 text-white rounded-2xl font-bold text-xs transition-all text-center active:scale-95"
+                >
+                  Tutup
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
       )}
     </div>
   );
