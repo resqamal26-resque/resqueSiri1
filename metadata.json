@@ -1,5 +1,8 @@
 {
-  "name": "ResQ single",
+  "name": "ResQ Amal",
   "description": "A clean and minimal mode selection interface with Single and Multi-Region options.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

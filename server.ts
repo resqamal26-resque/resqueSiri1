@@ -4,25 +4,25 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
+import FormData from 'form-data';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 async function startServer() {
-  const app = express();
+  const app = express(); // Removed limit here
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   app.post('/api/notify-logout', async (req, res) => {
     const data = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || '-1003966839581';
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || '-1003966839581';
 
     if (!botToken) {
-      return res.status(500).json({ error: 'Telegram configuration missing' });
+      console.error('Logout Notify: Telegram Bot Token missing');
+      return res.status(500).json({ error: 'Telegram configuration missing on server' });
     }
 
     const message = `
@@ -65,11 +65,12 @@ _Petugas telah menamatkan tugas_
 
   app.post('/api/notify-login', async (req, res) => {
     const data = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || '-1003966839581';
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || '-1003966839581';
 
     if (!botToken) {
-      return res.status(500).json({ error: 'Telegram configuration missing' });
+      console.error('Login Notify: Telegram Bot Token missing');
+      return res.status(500).json({ error: 'Telegram configuration missing on server' });
     }
 
     const message = `
@@ -116,17 +117,21 @@ ${data.programInfo && data.programInfo.nama ? `📋 *MAKLUMAT PROGRAM*
   // API Route for Telegram
   app.post('/api/send-telegram', async (req, res) => {
     const data = req.body;
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID;
 
     if (!botToken || !chatId) {
-      console.error('Telegram credentials missing');
-      return res.status(500).json({ error: 'Telegram configuration missing' });
+      console.error('Send Telegram: Credentials missing');
+      return res.status(500).json({ error: 'Telegram configuration missing on server' });
     }
 
-    const message = `
+    let message = '';
+    if (data.message) {
+      message = data.message;
+    } else if (data.dutyInfo) {
+      message = `
 🚨 *LAPORAN KES BARU* 🚨
-_Laporan dihantar dari sistem single phase_
+_No. Kes: ${data.case_number || 'N/A'}_
 
 📍 *MAKLUMAT TUGAS*
 • Petugas: ${data.dutyInfo.nama}
@@ -153,7 +158,10 @@ _Laporan dihantar dari sistem single phase_
 • Status Kes: ${data.statusKes}
 • Nama Perawat: ${data.namaPerawat || '-'}
 • Nama Responder: ${data.namaResponder}
-    `.trim();
+      `.trim();
+    } else {
+      return res.status(400).json({ error: 'Missing message or dutyInfo' });
+    }
 
     try {
       const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -175,6 +183,124 @@ _Laporan dihantar dari sistem single phase_
       }
     } catch (error) {
       console.error('Fetch error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // API Route for Telegram with Images
+  app.post('/api/send-report-with-images', async (req, res) => {
+    const { reportData, message, images } = req.body;
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID;
+
+    if (!botToken || !chatId) {
+      console.error('Send Report: Credentials missing');
+      return res.status(500).json({ error: 'Telegram configuration missing on server' });
+    }
+
+    try {
+      // 1. Send the text message
+      const textResponse = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+          parse_mode: 'Markdown',
+        }),
+      });
+
+      const textResult = await textResponse.json() as any;
+      if (!textResult.ok) {
+        console.error('Telegram text API error:', textResult);
+      }
+
+      // 2. Send images if any
+      if (images && images.length > 0) {
+        if (images.length === 1) {
+          // Single image
+          const base64Data = images[0].split(',')[1];
+          const buffer = Buffer.from(base64Data, 'base64');
+          
+          const formData = new FormData();
+          formData.append('chat_id', chatId);
+          formData.append('photo', buffer, { filename: 'report_image.jpg', contentType: 'image/jpeg' });
+          formData.append('caption', `📷 Gambar Lampiran untuk Kes: ${reportData.case_number || 'N/A'}`);
+          
+          await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+            method: 'POST',
+            body: formData,
+          });
+        } else {
+          // Multiple images using sendMediaGroup
+          const media = [];
+          const formData = new FormData();
+          formData.append('chat_id', chatId);
+
+          for (let i = 0; i < images.length; i++) {
+            const base64Data = images[i].split(',')[1];
+            const buffer = Buffer.from(base64Data, 'base64');
+            const fileId = `photo${i}`;
+            
+            formData.append(fileId, buffer, { filename: `image_${i}.jpg`, contentType: 'image/jpeg' });
+            
+            media.push({
+              type: 'photo',
+              media: `attach://${fileId}`,
+              caption: i === 0 ? `📷 Gambar Lampiran (${images.length}) untuk Kes: ${reportData.case_number || 'N/A'}` : ''
+            });
+          }
+
+          formData.append('media', JSON.stringify(media));
+
+          await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, {
+            method: 'POST',
+            body: formData,
+          });
+        }
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Telegram send error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // API Route for sending PDF to Telegram
+  app.post('/api/send-pdf-telegram', async (req, res) => {
+    const { pdfBase64, filename, caption } = req.body;
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID || process.env.VITE_TELEGRAM_CHAT_ID;
+
+    if (!botToken || !chatId) {
+      console.error('Send PDF: Credentials missing');
+      return res.status(500).json({ error: 'Telegram configuration missing on server' });
+    }
+
+    try {
+      const buffer = Buffer.from(pdfBase64, 'base64');
+      const formData = new FormData();
+      formData.append('chat_id', chatId);
+      formData.append('document', buffer, { filename: filename || 'report.pdf', contentType: 'application/pdf' });
+      if (caption) {
+        formData.append('caption', caption);
+      }
+
+      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json() as any;
+      if (result.ok) {
+        res.json({ success: true });
+      } else {
+        console.error('Telegram PDF API error:', result);
+        res.status(500).json({ error: 'Failed to send PDF to Telegram' });
+      }
+    } catch (error) {
+      console.error('Telegram PDF send error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "Report": {
+      "title": "Case Report",
+      "description": "Full medical report for a patient case",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "namaProgram": { "type": "string" },
+        "tarikh": { "type": "string" },
+        "masa": { "type": "string" },
+        "lokasi": { "type": "string" },
+        "namaPesakit": { "type": "string" },
+        "umur": { "type": "string" },
+        "jantina": { "type": "string" },
+        "aduan": { "type": "string" },
+        "tandaVital": { "type": "string" },
+        "rawatan": { "type": "string" },
+        "statusKes": { "type": "string" },
+        "namaPerawat": { "type": "string" },
+        "namaResponder": { "type": "string" },
+        "region": { "type": "string" },
+        "kawasan": { "type": "string" },
+        "case_number": { "type": "string" },
+        "images": { 
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Base64 encoded images attached to the report"
+        },
+        "mode": { "type": "string", "enum": ["live", "test"], "default": "live" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["namaProgram", "tarikh", "namaPesakit", "statusKes", "namaResponder", "createdAt"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Duty session attendance logs",
+      "type": "object",
+      "properties": {
+        "nama": { "type": "string" },
+        "kawasan": { "type": "string" },
+        "region": { "type": "string" },
+        "program_nama": { "type": "string" },
+        "login_time": { "type": "string", "format": "date-time" },
+        "logout_time": { "type": "string", "format": "date-time" },
+        "mode": { "type": "string", "enum": ["live", "test"], "default": "live" }
+      }
+    },
+    "DutySession": {
+       "title": "Duty Session",
+       "description": "Current duty session for a responder",
+       "type": "object",
+       "properties": {
+         "userId": { "type": "string" },
+         "nama": { "type": "string" },
+         "kawasan": { "type": "string" },
+         "region": { "type": "string" },
+         "loginTime": { "type": "string" },
+         "programInfo": { "$ref": "#/entities/ProgramInfo" }
+       }
+    },
+    "ProgramInfo": {
+      "type": "object",
+      "properties": {
+        "nama": { "type": "string" },
+        "tarikh": { "type": "string" },
+        "masa": { "type": "string" },
+        "lokasi": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Collection of all medical reports"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Collection of all duty session logs"
+    }
+  }
+}
