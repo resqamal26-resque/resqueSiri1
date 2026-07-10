@@ -213,8 +213,16 @@ export default function App() {
     } catch (error: any) {
       console.error('Firebase Auth Error:', error);
       setFirebaseTestStatus('error');
-      setFirebaseTestMessage(`Gagal Log Masuk: ${error.message || 'Ralat tidak diketahui'}`);
-      showNotification('Ralat Log Masuk', 'Gagal mendaftar masuk menggunakan Google.', 'warning');
+      
+      if (error.code === 'auth/unauthorized-domain' || (error.message && error.message.includes('unauthorized-domain'))) {
+        const domain = window.location.hostname;
+        const msg = `Domain "${domain}" belum dibenarkan di Firebase Console. Sila pergi ke Firebase Console -> Authentication -> Settings -> Authorized domains, kemudian tambah "${domain}".`;
+        setFirebaseTestMessage(`Ralat: Domain tidak dibenarkan (${domain})`);
+        showNotification('Domain Tidak Dibenarkan', msg, 'warning');
+      } else {
+        setFirebaseTestMessage(`Gagal Log Masuk: ${error.message || 'Ralat tidak diketahui'}`);
+        showNotification('Ralat Log Masuk', 'Gagal mendaftar masuk menggunakan Google.', 'warning');
+      }
     }
   };
 
