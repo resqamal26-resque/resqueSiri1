@@ -26,7 +26,7 @@ export { app };
   app.post('/api/notify-logout', async (req, res) => {
     const data = req.body;
     const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || '-1003966839581';
+    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE;
 
     if (!botToken) {
       console.error('Logout Notify: Telegram Bot Token missing');
@@ -74,7 +74,7 @@ _Petugas telah menamatkan tugas_
   app.post('/api/notify-login', async (req, res) => {
     const data = req.body;
     const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.VITE_TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE || '-1003966839581';
+    const chatId = process.env.TELEGRAM_CHAT_ID_ATTENDANCE || process.env.VITE_TELEGRAM_CHAT_ID_ATTENDANCE;
 
     if (!botToken) {
       console.error('Login Notify: Telegram Bot Token missing');
