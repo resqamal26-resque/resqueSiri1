@@ -13,7 +13,7 @@ import {
   Bot, Send, Shield, Edit2, LogOut, Users, BarChart3, ChevronDown,
   Camera, Image as ImageIcon, Plus, X, LayoutDashboard, UserMinus, 
   AlertTriangle, Zap, Share2, Download, FileCheck, FileBarChart,
-  Sliders, Save
+  Sliders, Save, Play
 } from 'lucide-react';
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -2143,10 +2143,25 @@ _Petugas telah menamatkan tugas_
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="flex flex-col items-center gap-8 relative w-[300px] h-[211.847px]"
+            className="flex flex-col items-center gap-6 relative w-[300px]"
           >
             {/* Top Action Menu Bar */}
             <div className="absolute -top-12 -right-4 flex items-center gap-1.5 z-50">
+              {/* Live/Test Mode Toggle Switch */}
+              <button
+                type="button"
+                onClick={() => setIsTestMode(!isTestMode)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 bg-white shadow-sm border border-gray-100 rounded-xl transition-all active:scale-95 text-[10px] font-bold cursor-pointer ${
+                  isTestMode 
+                    ? 'text-orange-600 border-orange-100 hover:text-orange-700 hover:border-orange-200' 
+                    : 'text-green-600 border-green-100 hover:text-green-700 hover:border-green-200'
+                }`}
+                title="Tukar Mode Sistem (LIVE / TEST)"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${isTestMode ? 'bg-orange-500 animate-pulse' : 'bg-green-500 animate-pulse'}`} />
+                <span>{isTestMode ? 'TEST MODE' : 'LIVE MODE'}</span>
+              </button>
+
               {/* Rujukan Tanda Vital Link */}
               <button
                 type="button"
@@ -2181,7 +2196,7 @@ _Petugas telah menamatkan tugas_
             </div>
 
             {/* Logo Section */}
-            <div className="text-center space-y-4 mb-4">
+            <div className="text-center space-y-4 mb-2">
               <motion.div 
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
@@ -2200,55 +2215,19 @@ _Petugas telah menamatkan tugas_
               </div>
             </div>
 
-            {/* Mode Toggle - Moved below logo phrasing */}
-            <div className="flex bg-gray-100 p-1 rounded-2xl border border-gray-200">
-              <button
-                onClick={() => setIsTestMode(false)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                  !isTestMode ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                LIVE MODE
-              </button>
-              <button
-                onClick={() => setIsTestMode(true)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                  isTestMode ? 'bg-orange-500 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                TEST MODE
-              </button>
-            </div>
-
-              <div className="flex flex-row gap-4 justify-center">
-                {/* Single Mode Card */}
-                <motion.button
-                  onClick={handleSingleMode}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="w-[150px] h-[150px] bg-white p-4 rounded-2xl shadow-lg hover:shadow-xl border border-gray-100 hover:border-blue-500 cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center group"
-                >
-                  <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
-                    <LayoutGrid className="text-blue-600 w-6 h-6" />
-                  </div>
-                  <h2 className="text-sm font-bold text-gray-900 leading-tight">Akses Negeri</h2>
-                  <p className="text-[8px] uppercase tracking-widest font-bold text-gray-400 mt-1">Status Peribadi</p>
-                </motion.button>
-
-                {/* Multi-Region Mode Card */}
-                <motion.button
-                  onClick={handleMultiRegionMode}
-                  whileHover={{ scale: 1.05, y: -2 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="w-[150px] h-[150px] bg-white p-4 rounded-2xl shadow-lg hover:shadow-xl border border-gray-100 hover:border-purple-500 cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center group"
-                >
-                  <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-3 group-hover:bg-purple-100 transition-colors">
-                    <Globe className="text-purple-600 w-6 h-6" />
-                  </div>
-                  <h2 className="text-sm font-bold text-gray-900 leading-tight">HQ</h2>
-                  <p className="text-[8px] uppercase tracking-widest font-bold text-gray-400 mt-1">Pilih Kawasan</p>
-                </motion.button>
+            {/* Single Mula Tugas Button */}
+            <motion.button
+              onClick={handleSingleMode}
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              className="w-[180px] h-[140px] bg-white p-4 rounded-3xl shadow-lg hover:shadow-xl border border-gray-100 hover:border-blue-500 cursor-pointer transition-all duration-300 flex flex-col items-center justify-center text-center group"
+            >
+              <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-2 group-hover:bg-blue-100 transition-colors">
+                <Play className="text-blue-600 w-5 h-5 fill-blue-600" />
               </div>
+              <h2 className="text-base font-black text-gray-900 leading-tight">Mula Tugas</h2>
+              <p className="text-[9px] uppercase tracking-wider font-bold text-gray-400 mt-1">Akses Negeri</p>
+            </motion.button>
 
           </motion.div>
         )}
